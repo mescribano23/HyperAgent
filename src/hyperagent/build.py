@@ -1,14 +1,44 @@
 import docker
+import base64
+import importlib
+import json
+import os
+import re
+import sys
+import uuid
+from queue import Empty
+
+
+def _patch_optional_import_compatibility() -> None:
+    try:
+        kernel_gateway = importlib.import_module("kernel_gateway")
+    except ImportError:
+        pass
+    else:
+        sys.modules.setdefault("jupyter_kernel_gateway", kernel_gateway)
+
+    try:
+        import pydantic
+    except ImportError:
+        return
+    if not hasattr(pydantic, "field_validator") and hasattr(pydantic, "validator"):
+        pydantic.field_validator = pydantic.validator
+
+
+_patch_optional_import_compatibility()
+
 from hyperagent.tools.tools import *
 from hyperagent.prompts.utils import jupyter_prompt
-from autogen.coding.base import CodeBlock
-from autogen.coding.jupyter import EmbeddedIPythonCodeExecutor
+from autogen.coding.base import CodeBlock, CodeExtractor, IPythonCodeResult
 from autogen.coding import DockerCommandLineCodeExecutor
 from autogen.coding.docker_commandline_code_executor import _wait_for_ready
 from autogen.coding.base import CodeBlock, CommandLineCodeResult
+from autogen.coding.markdown_code_extractor import MarkdownCodeExtractor
 from autogen.code_utils import TIMEOUT_MSG, _cmd
 from autogen.coding.utils import _get_file_name_from_content, silence_pip
 from hashlib import md5
+from jupyter_client import KernelManager
+from jupyter_client.kernelspec import KernelSpecManager
 
 import atexit
 import logging
@@ -17,11 +47,130 @@ from typing import Any, ClassVar, Dict, List, Optional, Type, Union
 from docker.errors import ImageNotFound
 from pathlib import Path
 
-class EICE(EmbeddedIPythonCodeExecutor):
-    # Override the execute_code_blocks method to only execute the tool functions or initialization of these functions. 
-    def execute_code_blocks(self, code_blocks: List[CodeBlock]):
+class EICE:
+    def __init__(self, timeout: int = 60, kernel_name: str = "python3", output_dir: str = "."):
+        if timeout < 1:
+            raise ValueError("Timeout must be greater than or equal to 1.")
+        if not os.path.exists(output_dir):
+            raise ValueError(f"Output directory {output_dir} does not exist.")
+        if kernel_name not in KernelSpecManager().find_kernel_specs():
+            raise ValueError(
+                f"Kernel {kernel_name} is not installed. "
+                "Please first install it with "
+                f"`python -m ipykernel install --user --name {kernel_name}`."
+            )
+
+        self.timeout = timeout
+        self.kernel_name = kernel_name
+        self.output_dir = output_dir
+        self._kernel_manager = self._new_kernel_manager()
+        self._kernel_manager.start_kernel()
+        self._kernel_client = self._kernel_manager.client()
+        self._kernel_client.start_channels()
+        self._timeout = self.timeout
+        self._output_dir = Path(self.output_dir)
+        atexit.register(self.shutdown)
+
+    def _new_kernel_manager(self) -> KernelManager:
+        kernel_manager = KernelManager(kernel_name=self.kernel_name)
+        kernel_argv = kernel_manager.kernel_spec.argv
+        if kernel_argv and os.path.isabs(kernel_argv[0]) and not os.path.exists(kernel_argv[0]):
+            logging.warning(
+                "Kernel %s points to missing interpreter %s; using %s instead.",
+                self.kernel_name,
+                kernel_argv[0],
+                sys.executable,
+            )
+            kernel_argv[0] = sys.executable
+        return kernel_manager
+
+    @property
+    def code_extractor(self) -> CodeExtractor:
+        return MarkdownCodeExtractor()
+
+    # Override execution to only execute the tool functions or initialization of these functions.
+    def execute_code_blocks(self, code_blocks: List[CodeBlock]) -> IPythonCodeResult:
         tool_call_code_blocks = [block for block in code_blocks if "_run" in block.code or "Initialize" in block.code]
-        return super().execute_code_blocks(tool_call_code_blocks)
+        self._kernel_client.wait_for_ready()
+        outputs = []
+        output_files = []
+        for code_block in tool_call_code_blocks:
+            code = self._process_code(code_block.code)
+            self._kernel_client.execute(code, store_history=True)
+            while True:
+                try:
+                    msg = self._kernel_client.get_iopub_msg(timeout=self._timeout)
+                    msg_type = msg["msg_type"]
+                    content = msg["content"]
+                    if msg_type in ["execute_result", "display_data"]:
+                        for data_type, data in content["data"].items():
+                            if data_type == "text/plain":
+                                outputs.append(data)
+                            elif data_type.startswith("image/"):
+                                path = self._save_image(data)
+                                outputs.append(f"Image data saved to {path}")
+                                output_files.append(path)
+                            elif data_type == "text/html":
+                                path = self._save_html(data)
+                                outputs.append(f"HTML data saved to {path}")
+                                output_files.append(path)
+                            else:
+                                outputs.append(json.dumps(data))
+                    elif msg_type == "stream":
+                        outputs.append(content["text"])
+                    elif msg_type == "error":
+                        return IPythonCodeResult(
+                            exit_code=1,
+                            output=f"ERROR: {content['ename']}: {content['evalue']}\n{content['traceback']}",
+                        )
+                    if msg_type == "status" and content["execution_state"] == "idle":
+                        break
+                except Empty:
+                    return IPythonCodeResult(
+                        exit_code=1,
+                        output=f"ERROR: Timeout waiting for output from code block: {code_block.code}",
+                    )
+        return IPythonCodeResult(
+            exit_code=0, output="\n".join([str(output) for output in outputs]), output_files=output_files
+        )
+
+    def restart(self) -> None:
+        self._kernel_client.stop_channels()
+        self._kernel_manager.shutdown_kernel()
+        self._kernel_manager = self._new_kernel_manager()
+        self._kernel_manager.start_kernel()
+        self._kernel_client = self._kernel_manager.client()
+        self._kernel_client.start_channels()
+
+    def shutdown(self) -> None:
+        try:
+            self._kernel_client.stop_channels()
+            self._kernel_manager.shutdown_kernel(now=True)
+        except Exception:
+            pass
+
+    def _save_image(self, image_data_base64: str) -> str:
+        image_data = base64.b64decode(image_data_base64)
+        filename = f"{uuid.uuid4().hex}.png"
+        path = os.path.join(self.output_dir, filename)
+        with open(path, "wb") as f:
+            f.write(image_data)
+        return os.path.abspath(path)
+
+    def _save_html(self, html_data: str) -> str:
+        filename = f"{uuid.uuid4().hex}.html"
+        path = os.path.join(self.output_dir, filename)
+        with open(path, "w") as f:
+            f.write(html_data)
+        return os.path.abspath(path)
+
+    def _process_code(self, code: str) -> str:
+        lines = code.split("\n")
+        for i, line in enumerate(lines):
+            match = re.search(r"^! ?pip install", line)
+            if match is not None and "-qqq" not in line:
+                lines[i] = line.replace(match.group(0), match.group(0) + " -qqq")
+        return "\n".join(lines)
 
 class DCLCE(DockerCommandLineCodeExecutor):
     def __init__(
@@ -191,21 +340,21 @@ if __name__ == "__main__":
     llm_config = [{
         "model": "claude-3-5-sonnet-20240620",
         "api_type": os.environ.get("ANTHROPIC_API_KEY"),
-        "stop_sequences": ["\nObservation:"],
+        "stop": ["\nObservation:"],
         "price": [0.003, 0.015],
         "base_url": "https://api.anthropic.com",
         "api_type": "anthropic",
     }]
 
     executor_assistant = AssistantAgent(
-        "Inner-Executor-Assistant",
+        "Inner_Executor_Assistant",
         system_message=system_exec,
         llm_config={"config_list": llm_config},
         human_input_mode="NEVER",
     )
 
     executor_interpreter = UserProxyAgent(
-        name="Executor Interpreter",
+        name="Executor_Interpreter",
         llm_config=False,
         code_execution_config={
             "executor": docker_executor,
@@ -224,7 +373,7 @@ if __name__ == "__main__":
     
     manager_exec = GroupChatManager(
         groupchat=groupchat_exec,
-        name="Executor Manager",
+        name="Executor_Manager",
         llm_config={"config_list": llm_config},
         max_consecutive_auto_reply=0
     )

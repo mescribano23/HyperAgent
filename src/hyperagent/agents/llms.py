@@ -1,6 +1,9 @@
 from typing import Any
 from openai import OpenAI, AzureOpenAI
-from vllm import LLM as vLLM
+try:
+    from vllm import LLM as vLLM
+except Exception:
+    vLLM = None
 from transformers import AutoTokenizer, AutoConfig
 from groq import Groq
 import os
@@ -134,6 +137,8 @@ class AzureLLM(LLM):
 class VLLM(LLM):
     def __init__(self, config):
         super().__init__(config)
+        if vLLM is None:
+            raise RuntimeError("vllm is not installed or could not be imported. Install vllm to use Local VLLM inference.")
         self.client = vLLM(
             model = config["model"], 
             tensor_parallel_size = 2,

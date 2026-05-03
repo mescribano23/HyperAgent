@@ -27,7 +27,7 @@ for row in tqdm.tqdm(rows):
     prompt_messages = [message for message in ast.literal_eval(row[1])["messages"]]
     for message in prompt_messages:
         if "name" in message.keys():
-            if "Navigator Interpreter" == message["name"]:
+            if "Navigator_Interpreter" == message["name"]:
                 append_flag = True
     
     if append_flag:

@@ -1,5 +1,5 @@
 import os
-from typing import Type, List, Optional, Callable
+from typing import Type, List, Optional, Callable, Any
 from pydantic import BaseModel, Field
 from langchain.tools import BaseTool, Tool
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -21,7 +21,10 @@ from hyperagent.multilspy import lsp_protocol_handler
 from hyperagent.utils import find_all_file_paths, find_matching_abs_path
 from hyperagent.constants import SEMANTIC_CODE_SEARCH_DB_PATH
 import os.path as osp
-from transformers import AutoModel
+try:
+    from transformers import AutoModel
+except Exception:
+    AutoModel = None
 from numpy.linalg import norm
 
 class CodeSearchArgs(BaseModel):
@@ -323,14 +326,20 @@ class OpenFileTool(BaseTool):
     path = ""
     language = ""
     parser: Optional[Callable] = None
-    model: AutoModel = None
+    model: Optional[Any] = None
     
     def __init__(self, path, language=None):
         super().__init__()
         self.path = path
         self.parser = get_parser(language)
         self.language = language
-        self.model = AutoModel.from_pretrained('jinaai/jina-embeddings-v2-base-code', trust_remote_code=True)
+        if AutoModel is not None:
+            try:
+                self.model = AutoModel.from_pretrained('jinaai/jina-embeddings-v2-base-code', trust_remote_code=True)
+            except Exception:
+                self.model = None
+        else:
+            self.model = None
     
     def _run(self, relative_file_path: str, start_line: Optional[int] = None, end_line: Optional[int] = None, keywords: Optional[List[str]] = [], preview_size: int = 8, max_num_result: int = 5, semantic_query: str = ""):
         """
@@ -358,7 +367,10 @@ class OpenFileTool(BaseTool):
             return [lst[i:i + chunk_size] for i in range(0, len(lst), chunk_size)]
         
         if semantic_query != "":
-            embeddings = self.modle.encode(
+            if self.model is None:
+                return "Semantic search requires the optional 'transformers' and a compatible backend (PyTorch). Install them to use this feature."
+
+            embeddings = self.model.encode(
                 [
                     "\n".join(segment_lst) for segment_lst in chunk_list(lines, 50)
                 ]
@@ -508,7 +520,7 @@ class SemanticCodeSearchTool(Tool):
             return [doc.page_content for doc in retrieved_docs]
         
         super().__init__(
-            name="Semantic Code Search",
+            name="Semantic_Code_Search",
             func=semantic_code_search,
             description="useful for when the query is a sentance, semantic and vague. If exact search such as code search failed after multiple tries, try this",
         )

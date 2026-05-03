@@ -22,4 +22,4 @@ if __name__ == "__main__":
     pilot = HyperAgent(args.repo, commit=args.commit, language=args.language, clone_dir="data/repos")
     logger.info("Setup done!")
     
-    print(pilot.query_codebase(args.question))
+    print(pilot.query_codebase(args.prompt))

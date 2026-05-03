@@ -25,14 +25,14 @@ def main():
         "nav": [{
             "model": "claude-3-haiku-20240307",
             "api_type": os.environ.get("ANTHROPIC_API_KEY"),
-            "stop_sequences": ["\nObservation:"],
+            "stop": ["\nObservation:"],
             "base_url": "https://api.anthropic.com",
             "api_type": "anthropic",
         }],
         "edit": [{
             "model": "claude-3-5-sonnet-20240620",
             "api_type": os.environ.get("ANTHROPIC_API_KEY"),
-            "stop_sequences": ["\nObservation:"],
+            "stop": ["\nObservation:"],
             "price": [0.003, 0.015],
             "base_url": "https://api.anthropic.com",
             "api_type": "anthropic",
@@ -40,7 +40,7 @@ def main():
         "exec": [{
             "model": "claude-3-haiku-20240307",
             "api_type": os.environ.get("ANTHROPIC_API_KEY"),
-            "stop_sequences": ["\nObservation:"],
+            "stop": ["\nObservation:"],
             "price": [0.003, 0.015],
             "base_url": "https://api.anthropic.com",
             "api_type": "anthropic",

@@ -11,42 +11,36 @@ DEFAULT_PLANNER_TYPE = "static"
 DEFAULT_VLLM_PORT = 5200
 DEFAULT_LANGUAGE = "python"
 DEFAULT_VERBOSE_LEVEL = 1
-DEFAULT_TRAJECTORIES_PATH = "/datadrive5/huypn16/HyperAgent/data/agent_trajectories/nav"
+DEFAULT_TRAJECTORIES_PATH = "data/agent_trajectories/nav"
 DO_NOT_SUMMARIZED_KEYS = ["python", "code_snippet"]
 
 DEFAULT_LLM_CONFIGS = {
-        "name": "claude",
-        "nav": [{
-            "model": "claude-3-haiku-20240307",
-            "api_key": os.environ.get("ANTHROPIC_API_KEY"),
-            "stop_sequences": ["\nObservation:"],
-            "base_url": "https://api.anthropic.com",
-            "api_type": "anthropic",
-        }],
-        "edit": [{
-            "model": "claude-3-5-sonnet-20240620",
-            "api_key": os.environ.get("ANTHROPIC_API_KEY"),
-            "stop_sequences": ["\nObservation:"],
-            "price": [0.003, 0.015],
-            "base_url": "https://api.anthropic.com",
-            "api_type": "anthropic",
-        }],
-        "exec": [{
-            "model": "claude-3-5-sonnet-20240620",
-            "api_type": os.environ.get("ANTHROPIC_API_KEY"),
-            "stop_sequences": ["\nObservation:"],
-            "price": [0.003, 0.015],
-            "base_url": "https://api.anthropic.com",
-            "api_type": "anthropic",
-        }],
-        "plan": [{
-            "model": "claude-3-5-sonnet-20240620",
-            "api_type": os.environ.get("ANTHROPIC_API_KEY"),
-            "price": [0.003, 0.015],
-            "base_url": "https://api.anthropic.com",
-            "api_type": "anthropic",
-        }],
-        "type": "patch"
-    }
+    "name": "openai",
+    "nav": [{
+        "model": "gpt-4o-mini",
+        "api_key": os.environ.get("OPENAI_API_KEY"),
+        "stop": ["\nObservation:"],
+        "api_type": "openai",
+    }],
+    "edit": [{
+        "model": "gpt-4o-mini",
+        "api_key": os.environ.get("OPENAI_API_KEY"),
+        "stop": ["\nObservation:"],
+        "api_type": "openai",
+    }],
+    "exec": [{
+        "model": "gpt-4o-mini",
+        "api_key": os.environ.get("OPENAI_API_KEY"),
+        "stop": ["\nObservation:"],
+        "api_type": "openai",
+    }],
+    "plan": [{
+        "model": "gpt-4o-mini",
+        "api_key": os.environ.get("OPENAI_API_KEY"),
+        "api_type": "openai",
+    }],
+    "type": "patch"
+}
+
 DEFAULT_IMAGE_NAME = "python:3-slim"
-D4J_FOLDER = "/datadrive5/huypn16/defects4j"
+D4J_FOLDER = "data/defects4j"

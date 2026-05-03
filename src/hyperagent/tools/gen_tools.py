@@ -4,15 +4,28 @@ from langchain.tools import BaseTool
 import subprocess
 from typing import List, Optional, Callable
 from hyperagent.llm_multilspy import add_num_line
-from hyperagent.agents.llms import LocalLLM, AzureLLM
+from hyperagent.agents.llms import LocalLLM, AzureLLM, OpenAILLM
 import os
 from hyperagent.code_search import get_parser
 from hyperagent.utils import find_matching_file_path
 from codetext.utils import parse_code
 import re
 
-summarizer = LocalLLM({"model": "mistralai/Mixtral-8x7B-Instruct-v0.1", "system_prompt": "Describe this error message in plain text.", "max_tokens": 25000})
-reviewer = AzureLLM({"model": "gpt-4-turbo", "system_prompt": "You're a software engineer working on a project, given a hint of code replacement of original file, you need to generate a block of code that can be replaced into the original. Do not generate additional line if it's unecessary to the hint. Pay attention to line number and indentation", "max_tokens": 10000})
+if os.environ.get("OPENAI_API_KEY"):
+    summarizer = OpenAILLM({"model": "gpt-4o", "system_prompt": "Describe this error message in plain text.", "max_tokens": 25000, "openai_api_key": os.environ.get("OPENAI_API_KEY")})
+elif os.environ.get("TOGETHER_API_KEY"):
+    summarizer = LocalLLM({"model": "mistralai/Mixtral-8x7B-Instruct-v0.1", "system_prompt": "Describe this error message in plain text.", "max_tokens": 25000})
+else:
+    def summarizer(text: str) -> str:
+        return "[No LLM configured to summarize errors]"
+
+# Prefer Azure if Azure endpoints are configured, otherwise fall back to OpenAI when available.
+if os.environ.get("AZURE_ENDPOINT_GPT4") or os.environ.get("AZURE_ENDPOINT_GPT35"):
+    reviewer = AzureLLM({"model": "gpt-4-turbo", "system_prompt": "You're a software engineer working on a project, given a hint of code replacement of original file, you need to generate a block of code that can be replaced into the original. Do not generate additional line if it's unecessary to the hint. Pay attention to line number and indentation", "max_tokens": 10000})
+elif os.environ.get("OPENAI_API_KEY"):
+    reviewer = OpenAILLM({"model": "gpt-4o", "system_prompt": "You're a software engineer working on a project, given a hint of code replacement of original file, you need to generate a block of code that can be replaced into the original. Do not generate additional line if it's unecessary to the hint. Pay attention to line number and indentation", "max_tokens": 10000, "openai_api_key": os.environ.get("OPENAI_API_KEY")})
+else:
+    reviewer = summarizer
 
 class EditorArgs(BaseModel):
     relative_file_path: str = Field(..., description="The relative file path of the file that is need to be edited")

@@ -1,12 +1,20 @@
+import os
 from autogen import UserProxyAgent, AssistantAgent, GroupChat, GroupChatManager, Agent, ConversableAgent
 from autogen.agentchat.contrib.society_of_mind_agent import SocietyOfMindAgent 
-from hyperagent.agents.llms import LocalLLM
+from hyperagent.agents.llms import LocalLLM, OpenAILLM
 from hyperagent.utils import extract_patch
 from hyperagent.prompts.utils import react_prompt_message, react_exec_prompt_message
 
 def load_summarizer():
     config = {"model": "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo", "system_prompt": "You're a helpful assistant", "max_tokens": 128000}
-    summarizer = LocalLLM(config)
+    if os.environ.get("OPENAI_API_KEY"):
+        return OpenAILLM({"model": "gpt-4o", "system_prompt": "You're a helpful assistant", "max_tokens": 8192, "openai_api_key": os.environ.get("OPENAI_API_KEY")})
+    if os.environ.get("TOGETHER_API_KEY"):
+        return LocalLLM(config)
+
+    def summarizer(text: str) -> str:
+        return "[No LLM configured for summarization]"
+
     return summarizer
 
 def load_agent_navigator(
@@ -24,14 +32,14 @@ def load_agent_navigator(
         return analysis
     
     navigator_assistant = AssistantAgent(
-        "Inner-Navigator-Assistant",
+        "Inner_Navigator_Assistant",
         system_message=sys_prompt,
         llm_config={"config_list": llm_config},
         human_input_mode="NEVER",
     )
     
     navigator_interpreter = UserProxyAgent(
-        name="Navigator Interpreter",
+        name="Navigator_Interpreter",
         is_termination_msg=terminate_condition,
         llm_config=False,
         code_execution_config={
@@ -51,7 +59,7 @@ def load_agent_navigator(
     
     manager_nav = GroupChatManager(
         groupchat=groupchat_nav,
-        name="Navigator Manager",
+        name="Navigator_Manager",
         llm_config={"config_list": llm_config},
         max_consecutive_auto_reply=0
     )
@@ -85,14 +93,14 @@ def load_agent_editor(
         return analysis
     
     editor_assistant = AssistantAgent(
-        "Inner-Editor-Assistant",
+        "Inner_Editor_Assistant",
         system_message=sys_prompt,
         llm_config={"config_list": llm_config},
         human_input_mode="NEVER",
     )
     
     editor_interpreter = UserProxyAgent(
-        name="Editor Interpreter",
+        name="Editor_Interpreter",
         is_termination_msg=terminate_condition,
         llm_config=False,
         code_execution_config={
@@ -112,7 +120,7 @@ def load_agent_editor(
     
     manager_edit = GroupChatManager(
         groupchat=groupchat_edit,
-        name="Editor Manager",
+        name="Editor_Manager",
         llm_config={"config_list": llm_config},
         max_consecutive_auto_reply=0
     )
@@ -146,14 +154,14 @@ def load_agent_executor(
         return plain_messages[-1].replace("Final Answer:", "")
     
     executor_assistant = AssistantAgent(
-        "Inner-Executor-Assistant",
+        "Inner_Executor_Assistant",
         system_message=sys_prompt,
         llm_config={"config_list": llm_config},
         human_input_mode="NEVER",
     )
     
     executor_interpreter = UserProxyAgent(
-        name="Executor Interpreter",
+        name="Executor_Interpreter",
         is_termination_msg=terminate_condition,
         llm_config=False,
         code_execution_config={
@@ -173,7 +181,7 @@ def load_agent_executor(
     
     manager_exec = GroupChatManager(
         groupchat=groupchat_exec,
-        name="Executor Manager",
+        name="Executor_Manager",
         llm_config={"config_list": llm_config},
         max_consecutive_auto_reply=0
     )
@@ -238,8 +246,6 @@ def load_manager(user_proxy, planner, navigator, editor, executor, llm_config):
     
     def stop_condition(msg):
         if "Final Answer"in msg["content"]:
-            return True
-        elif all([agent_name not in msg["content"] for agent_name in ["Navigator", "Editor", "Executor"]]) and msg["name"] == "Planner":
             return True
         else:
             return False
