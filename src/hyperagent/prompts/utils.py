@@ -138,10 +138,16 @@ find_file = FindFileTool(repo_dir, language=language)
 editor = EditorTool(repo_dir, language=language)
 open_file_gen = OpenFileToolForGenerator(repo_dir, language=language)"""
 
+def _render_prompt(template, request):
+    # The examples include code snippets with dict/JSON braces, so str.format()
+    # can accidentally treat literals like {"flux": ...} as placeholders.
+    return template.replace("{input}", request)
+
+
 def react_prompt_message(content):
    request = content.split("Subgoal:")[-1]
-   return ReAct_prompt.format(input=request)
+   return _render_prompt(ReAct_prompt, request)
 
 def react_exec_prompt_message(content):
     request = content.split("Subgoal:")[-1]
-    return Exec_ReAct_prompt.format(input=request)
+    return _render_prompt(Exec_ReAct_prompt, request)
