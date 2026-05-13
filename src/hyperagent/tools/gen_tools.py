@@ -2,6 +2,9 @@ import os.path as osp
 from pydantic import BaseModel, Field
 from langchain.tools import BaseTool
 import subprocess
+import shutil
+import sys
+import ast
 from typing import List, Optional, Callable
 from hyperagent.llm_multilspy import add_num_line
 from hyperagent.agents.llms import LocalLLM, AzureLLM, OpenAILLM
@@ -69,15 +72,11 @@ class EditorTool(BaseTool):
             abs_path = find_matching_file_path(self.path, relative_file_path)
             if abs_path is None:
                 return "File not found, please check the path again"
-        else:
-            # create new file
-            with open(abs_path, 'w') as file:
-                file.write("")
-        
+
         with open(abs_path, 'r') as file:
             lines = file.readlines()
             
-        if end_line is  None or end_line is None:
+        if start_line is None or end_line is None:
             return "Please specify either start and end line"
         
         if start_line < 1 or start_line > end_line:
@@ -103,7 +102,8 @@ class EditorTool(BaseTool):
         original_block = "\n".join(original_lines_region)
         original_block = add_num_line(original_block, max(0, start_index-10)+1)
         
-        patch_file_path = str(abs_path).split('.')[0] + '_patched.' + str(abs_path).split('.')[1]
+        root, ext = os.path.splitext(abs_path)
+        patch_file_path = f"{root}_patched{ext}"
         
         # review_command = f"Context of Editing: {context}\nStart and End line of Original Target Block: {start_line}:{end_line}. Your should only edit inside this range of lines.\nFile Name: {patch_file_path}\nOriginal Target Block with Surrounding Lines:\n```python\n{original_block}\n```\n\nProposed Block:\n```python\n{initial_patch_block}\n```\n\nThink step by step, understanding the original block of code and intention of Proposed Hint Patch generate a python block that is syntactically correct, identation is correct to both harmonize the original code and satisfy the intention of the proposed hint patch. Think about indetation, intent then generate a block in ```python ``` format without line numbers inside block but with identation. Your Thought:"
         # reviewer_output = reviewer(review_command)
@@ -139,16 +139,27 @@ class EditorTool(BaseTool):
             file.writelines(updated_lines)
         
         if self.language == "python":
-        
-            command_fix = f"autopep8 --in-place --aggressive {patch_file_path}"
-            result = subprocess.run(command_fix, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-            
-            command = f"flake8 --isolated --select=F821,F822,F831,E111,E112,E113,E999,E902 {patch_file_path}"
-            result = subprocess.run(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-                
-            stderr_output = result.stderr
-            stdout_output = result.stdout
-            exit_code = result.returncode
+            if shutil.which("autopep8"):
+                command_fix = f"autopep8 --in-place --aggressive {patch_file_path}"
+                subprocess.run(command_fix, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+
+            if shutil.which("flake8"):
+                command = f"flake8 --isolated --select=F821,F822,F831,E111,E112,E113,E999,E902 {patch_file_path}"
+                result = subprocess.run(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+                stderr_output = result.stderr
+                stdout_output = result.stdout
+                exit_code = result.returncode
+            else:
+                try:
+                    with open(patch_file_path, "r") as candidate:
+                        ast.parse(candidate.read(), filename=patch_file_path)
+                    stderr_output = ""
+                    stdout_output = ""
+                    exit_code = 0
+                except SyntaxError as exc:
+                    stderr_output = str(exc)
+                    stdout_output = ""
+                    exit_code = 1
         elif self.language == "java":
             exit_code = 0
         else:
